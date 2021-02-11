@@ -101,7 +101,9 @@ var events = {
     primaryAuth: new RegExp(settings.events.primaryAuth) ,
     secondaryAuth: new RegExp(settings.events.secondaryAuth) ,
     authStart: new RegExp(settings.events.authStart) ,
-    authEnd: new RegExp(settings.events.authEnd) 
+    authEnd: new RegExp(settings.events.authEnd) ,
+    invalidCred1: new RegExp(settings.events.invalidCred1),
+    invalidCred2: new RegExp(settings.events.invalidCred2)
 }
 
 
@@ -175,6 +177,7 @@ var ssp_authn_txn = {
          factors: [],
          primaryCredential: "",
          secondaryCredential: "",
+         credError: [ { credential: "", count: 0 }, { credential: "", count: 0}],
          riskScore: 0,
          riskFactor: "NO_RISK",
          result: false
@@ -193,6 +196,10 @@ var ssp_authn_txn = {
                      rec.factors[0] = settings.factors[k];
                      rec.primaryCredential = settings.credentials[Math.floor(Math.random() * (settings.credentials.length - 1))];
                      rec.secondaryCredential = settings.credentials[Math.floor(Math.random() * (settings.credentials.length - 1))];
+                     rec.credError[0].credential = rec.primaryCredential;
+                     rec.credError[0].count = Math.floor(Math.random() * 7);
+                     rec.credError[1].credential = rec.secondaryCredential;
+                     rec.credError[1].count = Math.floor(Math.random() * 7);
                      rec.riskScore = Math.floor(Math.random() * 90);
                      rec.riskFactor = settings.factors[k];
                      rec.result = settings.results[l];
@@ -221,6 +228,8 @@ var ssp_authn_txn = {
       ssp_authn_response = ssp_authn_response + "# TYPE ssp_authn gauge\n" ;
       var ssp_risk_response = "# HELP ssp_risk: Risk score for the authn transaction and primary risk factor. \n";
       ssp_risk_response = ssp_risk_response + "# TYPE ssp_risk gauge\n" ;
+      var ssp_cred_error_response = "# HELP ssp_cred_error: Count of errors when using 1st and 2nd facture authenticationr. \n";
+      ssp_cred_error_response = ssp_cred_error_response + "# TYPE ssp_cred_error gauge\n" ;
 
       var keys = this.cache.keys();
       for (var keyId in keys) {
@@ -228,14 +237,18 @@ var ssp_authn_txn = {
          if (Number(rec.endTime) !== 0) {
             var duration = Number(rec.endTime) - Number(rec.startTime);
             var str1 = `ssp_authn{client=\"${rec.appName}\",source=\"${rec.source}\",userId=\"${rec.userId}\",credential1=\"${rec.primaryCredential}\",credential2=\"${rec.secondaryCredential}\",factor=\"${rec.riskFactor}\",result=\"${rec.result}\",txnId=\"${keys[keyId]}\"} ${duration}\n`
-            if (debugLevel > 1) {console.log(str1);};
+            if (debugLevel == 5) {console.log(str1);};
             ssp_authn_response += str1 ; 
             var str2 = `ssp_risk{client=\"${rec.appName}\",source=\"${rec.source}\",userId=\"${rec.userId}\",credential1=\"${rec.primaryCredential}\",credential2=\"${rec.secondaryCredential}\",factor=\"${rec.riskFactor}\",result=\"${rec.result}\",txnId=\"${keys[keyId]}\"} ${rec.riskScore}\n`
-            if (debugLevel > 1) {console.log(str2);};
+            if (debugLevel == 6) {console.log(str2);};
             ssp_risk_response += str2 ; 
+            var str3 = `ssp_cred_error{client=\"${rec.appName}\",source=\"${rec.source}\",userId=\"${rec.userId}\",credential=\"${rec.credError[0].credential}\",factor=\"${rec.riskFactor}\",result=\"${rec.result}\",txnId=\"${keys[keyId]}\"} ${rec.credError[0].count}\n`
+            str3 += `ssp_cred_error{client=\"${rec.appName}\",source=\"${rec.source}\",userId=\"${rec.userId}\",credential=\"${rec.credError[1].credential}\",factor=\"${rec.riskFactor}\",result=\"${rec.result}\",txnId=\"${keys[keyId]}\"} ${rec.credError[1].count}\n`
+            if (debugLevel == 7) {console.log(str3);};
+            ssp_cred_error_response += str3 ; 
          }
       }
-      return (ssp_authn_response + ssp_risk_response);
+      return (ssp_authn_response + ssp_risk_response  + ssp_cred_error_response);
    },
 
    start: function(key,timestamp,userId) {
@@ -251,6 +264,7 @@ var ssp_authn_txn = {
             factors: [],
             primaryCredential: "",
             secondaryCredential: "",
+            credError: [ { credential: "", count: 0 }, { credential: "", count: 0}],
             riskScore: 0,
             riskFactor: "NO_RISK",
             result: false
@@ -289,6 +303,7 @@ var ssp_authn_txn = {
             factors: [],
             primaryCredential: "",
             secondaryCredential: "",
+            credError: [ { credential: "", count: 0 }, { credential: "", count: 0}],
             riskScore: 0,
             riskFactor: "NO_RISK",
             result: false
@@ -317,6 +332,7 @@ var ssp_authn_txn = {
             factors: [],
             primaryCredential: "",
             secondaryCredential: "",
+            credError: [ { credential: "", count: 0 }, { credential: "", count: 0}],
             riskScore: 0,
             riskFactor: "NO_RISK",
             result: false
@@ -363,6 +379,17 @@ var ssp_authn_txn = {
       }
       if (!result) { if (debugLevel > 0) {console.log("Failure - ", key, " - ", timestamp)};}
       if (result) { if (debugLevel > 0) {console.log("success - ", key, " - ", timestamp)};}
+   },
+   fail: function(key,timestamp,credential,credId) {
+      var trans = ssp_authn_txn.cache.get(key);
+      if (trans == undefined) {
+	 console.log("FAIL Cant find txnId = ", key);
+      } else {
+         trans.credError[credId].count += 1;
+         trans.credError[credId].credential = credential;
+         ssp_authn_txn.cache.set(key,trans);
+      }
+      if (debugLevel > 0) {console.log("Credential Error - ", key, " - ", timestamp, " - ", credential)};
    }
 }
 
@@ -396,6 +423,12 @@ app.post('/sspLogStream', function(req, res) {
      }
      if (msg.match(events.authEnd)) {
         ssp_authn_txn.result(req.body[i].txnId,req.body[i].date,"success");
+     }
+     if (msg.match(events.invalidCred1)) {
+        ssp_authn_txn.fail(req.body[i].txnId,req.body[i].date,req.body[i]["factor-me-primary-ext-factorType"],0);
+     }
+     if (msg.match(events.invalidCred2)) {
+        ssp_authn_txn.fail(req.body[i].txnId,req.body[i].date,req.body[i]["factor-me-secondary-ext-factorType"],1);
      }
   }
 

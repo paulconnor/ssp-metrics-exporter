@@ -4,7 +4,7 @@
     - MOTP
     - SMS
     - PUSH
-    - PASSWORD
+    - ldap
   factors:
     - RISKY_COUNTRY
     - DEVICE_MFP_MISMATCH
