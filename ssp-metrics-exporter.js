@@ -8,7 +8,7 @@ const express = require('express')
 const app = express()
 const port = 8080;
 var   simLevel = 3;
-var   debugLevel = 1;
+var   debugLevel = 0;
 
 var bodyParser = require('body-parser');
 //app.use(bodyParser.json()); // support json encoded bodies
@@ -436,6 +436,6 @@ app.post('/sspLogStream', function(req, res) {
 });
 
 app.listen(port, () => {
-  console.log(`Example app listening at http://0.0.0.0:${port}`)
+  console.log(`SSP-METRICS-EXPORTER listening at http://0.0.0.0:${port}`)
 })
 
