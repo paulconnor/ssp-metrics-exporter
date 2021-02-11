@@ -5,6 +5,7 @@
     - SMS
     - PUSH
     - ldap
+    - PASSWORD
   factors:
     - RISKY_COUNTRY
     - DEVICE_MFP_MISMATCH

@@ -16,4 +16,4 @@ RUN npm install
 COPY . .
 
 EXPOSE 8080
-CMD [ "node", "ssp-sim.js" ]
+CMD [ "node", "ssp-metrics-exporter.js" ]

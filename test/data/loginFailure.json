@@ -1,0 +1,24 @@
+{
+	"date": 1609375789.191182,
+	"stream": "stdout",
+	"level": "error",
+	"type": "log",
+    "timestamp": "{{timestamp}}",
+	"thread": "qtp482987954-19",
+	"msg": "Invalid password for Bind DN cn=erussell,ou=HR,o=democorp,c=us. LDAP URL: ldap://104.196.224.174:389. Reason: [LDAP: error code 49 - Invalid Credentials]",
+	"api": "/ldap/v1/authenticate",
+	"clientId": "db5b3eb0-01ec-4af8-ae4b-27deebd9a763",
+	"clientIp": "116.255.18.54",
+	"clientTxnId": null,
+	"service": "ldap",
+	"tid": "default",
+        "txnId": "d3802b4c-11af-4266-af0c-2eb8c4afe239",
+	"userAgent": "PostmanRuntime/7.26.8",
+	"userIp": "116.255.18.54",
+	"kubernetes": {
+		"pod_name": "rs.poc-ssp-ldap-5f977799f7-9s48q",
+		"namespace_name": "demo",
+		"container_name": "ssp-ldap",
+		"docker_id": "0101e4c8c78dd5959a2bdff006fee505f9ff65fb9740f12abc20e7b88520dcb2"
+	}
+}
