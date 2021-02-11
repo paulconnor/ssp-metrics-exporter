@@ -1,0 +1,34 @@
+--- # SSP Configuration data
+  credentials:
+    - FIDO2
+    - MOTP
+    - SMS
+    - PUSH
+    - PASSWORD
+  factors:
+    - RISKY_COUNTRY
+    - DEVIC_MFP_MISMATCH
+    - KNOWN_FRAUD
+    - DIFFICULT_TRAVEL
+  clients:
+    - democlient1
+    - democlient2
+  categories:
+    - 1_active_now
+    - 2_active_last_hour
+    - 3_active_last_day
+    - 4_active_last_week
+    - 5_active_last_month
+    - 6_active_last_year
+    - 7_registered
+  results:
+    - success
+    - failure
+  events:
+      loginSuccess: 'Authentication for user (.*) successful'
+      loginFailure: 'Invalid password for (.*) Invalid Credentials'
+      riskScore: 'Final riskscore evaluated: (.*),(.*)'
+      riskFactor: 'Risk identified with the factor: (.*), risk_score: (.*)'
+      credential: 'Status for authenticateCredentials for (.*) for requestId (.*) : (.*)'
+      authStart: 'JWT signature verified successfully'
+      authEnd: 'Authentication for user (.*) successful'

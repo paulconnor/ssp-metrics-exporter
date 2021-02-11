@@ -1,13 +1,13 @@
 --- # SSP Configuration data
   credentials:
-    - FIDO2
+    - FIDO
     - MOTP
     - SMS
     - PUSH
     - PASSWORD
   factors:
     - RISKY_COUNTRY
-    - DEVIC_MFP_MISMATCH
+    - DEVICE_MFP_MISMATCH
     - KNOWN_FRAUD
     - DIFFICULT_TRAVEL
   clients:
@@ -30,5 +30,9 @@
       riskScore: 'Final riskscore evaluated: (.*),(.*)'
       riskFactor: 'Risk identified with the factor: (.*), risk_score: (.*)'
       credential: 'Status for authenticateCredentials for (.*) for requestId (.*) : (.*)'
-      authStart: 'JWT signature verified successfully'
-      authEnd: 'Authentication for user (.*) successful'
+      authStart: 'Authentication initiated successfully'
+      authEnd: 'Authentication Successful, ID token generated.'
+      primaryAuth: 'Primary authentication successful.'
+      secondaryAuth: 'Secondary authentication successful.'
+      invalidCred1: 'Authentication failed - Invalid Credentials'
+      invalidCred2: 'Incorrect authentication credentials'
