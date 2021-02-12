@@ -16,6 +16,11 @@ var bodyParser = require('body-parser');
 app.use(bodyParser.json({limit: '200mb'}));
 app.use(bodyParser.urlencoded({limit: '200mb', extended: true}));
 
+
+const maxAuthSessionTimer = 5000; // milliseconds ; assumes authn is abandoned if not completed with 2 minutes
+const maxAuthSessionDuration = 60000; // milliseconds ; assumes authn is abandoned if not completed with 2 minutes
+
+
 function simData(){
 
    var str = "";
@@ -390,8 +395,26 @@ var ssp_authn_txn = {
          ssp_authn_txn.cache.set(key,trans);
       }
       if (debugLevel > 0) {console.log("Credential Error - ", key, " - ", timestamp, " - ", credential)};
+   },
+   abandoned: function () {
+      var keys = ssp_authn_txn.cache.keys();
+      var currentTime = Date.now() / 1000 ;
+      for (var keyId in keys) {
+         var rec = ssp_authn_txn.cache.get(keys[keyId]);
+         if (Number(rec.endTime) == 0) {
+            if (Number(rec.startTime) !== 0) {
+               if ((currentTime - Number(rec.startTime))  > (maxAuthSessionDuration/1000)) {
+                  rec.result = "failure";
+                  rec.endTime = currentTime.toString();
+                  ssp_authn_txn.cache.set(keys[keyId],rec);
+               }
+            }
+         }
+      }
    }
 }
+
+setInterval(ssp_authn_txn.abandoned, maxAuthSessionTimer);
 
 
 app.post('/sspLogStream', function(req, res) {
