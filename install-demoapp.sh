@@ -1,0 +1,5 @@
+export CLIENTID=`kubectl get secret ${RELEASENAME}-ssp-secret-democlient -n ${NAMESPACE} -o jsonpath="{.data.clientId}" | base64 --decode; echo`
+export SECRET=` kubectl get secret ${RELEASENAME}-ssp-secret-democlient -n ${NAMESPACE} -o jsonpath="{.data.clientSecret}" | base64 --decode; echo`
+kubectl create secret tls sample-app-tls-generic --cert $CERTFILE --key $KEYFILE -n sampleapp
+helm install ssp-sample  -n sampleapp ssp_helm_charts/ssp-sample-app --set global.registry.credentials.username="authhub-install@ca" --set global.registry.credentials.password="346a437f8b869a8089a6c8766593fe8a99f1f4db" --render-subchart-notes --set ssp-symantec-dir.service.type=LoadBalancer  --set ssp-symantec-dir.service.servicePort=389  --set ssp.serviceUrl="https://ssppoc.iamdemo.broadcom.com/default/" --set ssp.clientId="$CLIENTID" --set ssp.clientSecret="$CLIENTID"  --set ingress.host="sampleapp.iamdemo.broadcom.com" --set ingress.tls.host="sampleapp.iamdemo.broadcom.com"  --set ingress.tls.secretName=sample-app-tls-generic
+

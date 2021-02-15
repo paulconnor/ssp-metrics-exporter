@@ -10,6 +10,13 @@ const port = 8080;
 var   simLevel = 3;
 var   debugLevel = 0;
 
+var   gRisk = {
+        riskResult: "",
+        riskReason: "",
+        riskScore: "",
+        riskThreshold: ""
+      };
+
 var bodyParser = require('body-parser');
 //app.use(bodyParser.json()); // support json encoded bodies
 //app.use(bodyParser.urlencoded({ extended: true })); // support encoded bodies
@@ -108,7 +115,8 @@ var events = {
     authStart: new RegExp(settings.events.authStart) ,
     authEnd: new RegExp(settings.events.authEnd) ,
     invalidCred1: new RegExp(settings.events.invalidCred1),
-    invalidCred2: new RegExp(settings.events.invalidCred2)
+    invalidCred2: new RegExp(settings.events.invalidCred2),
+    iarisk: new RegExp(settings.events.iarisk)
 }
 
 
@@ -244,7 +252,7 @@ var ssp_authn_txn = {
             var str1 = `ssp_authn{client=\"${rec.appName}\",source=\"${rec.source}\",userId=\"${rec.userId}\",credential1=\"${rec.primaryCredential}\",credential2=\"${rec.secondaryCredential}\",factor=\"${rec.riskFactor}\",result=\"${rec.result}\",txnId=\"${keys[keyId]}\"} ${duration}\n`
             if (debugLevel == 5) {console.log(str1);};
             ssp_authn_response += str1 ; 
-            var str2 = `ssp_risk{client=\"${rec.appName}\",source=\"${rec.source}\",userId=\"${rec.userId}\",credential1=\"${rec.primaryCredential}\",credential2=\"${rec.secondaryCredential}\",factor=\"${rec.riskFactor}\",result=\"${rec.result}\",txnId=\"${keys[keyId]}\"} ${rec.riskScore}\n`
+            var str2 = `ssp_risk{client=\"${rec.appName}\",source=\"${rec.source}\",userId=\"${rec.userId}\",credential1=\"${rec.primaryCredential}\",credential2=\"${rec.secondaryCredential}\",factor=\"${rec.riskFactor}\",risky=\"${rec.riskResult}\",result=\"${rec.result}\",txnId=\"${keys[keyId]}\"} ${rec.riskScore}\n`
             if (debugLevel == 6) {console.log(str2);};
             ssp_risk_response += str2 ; 
             var str3 = `ssp_cred_error{client=\"${rec.appName}\",source=\"${rec.source}\",userId=\"${rec.userId}\",credential=\"${rec.credError[0].credential}\",factor=\"${rec.riskFactor}\",result=\"${rec.result}\",txnId=\"${keys[keyId]}\"} ${rec.credError[0].count}\n`
@@ -276,11 +284,19 @@ var ssp_authn_txn = {
          };
          rec.startTime = timestamp;
          rec.userId = userId;
+         rec.riskResult = gRisk.riskResult;
+         rec.riskFactor = gRisk.riskReason;
+         rec.riskScore = gRisk.riskScore;
+         rec.riskThreshold = gRisk.riskThreshold;
          ssp_authn_txn.cache.set(key,rec);
          if (debugLevel > 0) {console.log("authStart - ", key, " - ", timestamp); }
       } else {
          trans.startTime = timestamp;
          trans.userId = userId;
+         trans.riskResult = gRisk.riskResult;
+         trans.riskFactor = gRisk.riskReason;
+         trans.riskScore = gRisk.riskScore;
+         trans.riskThreshold = gRisk.riskThreshold;
          ssp_authn_txn.cache.set(key,trans);
          if (debugLevel > 0) {console.log("authStart - ", key, " - ", timestamp); }
       }
@@ -452,6 +468,26 @@ app.post('/sspLogStream', function(req, res) {
      }
      if (msg.match(events.invalidCred2)) {
         ssp_authn_txn.fail(req.body[i].txnId,req.body[i].date,req.body[i]["factor-me-secondary-ext-factorType"],1);
+     }
+     result = msg.match(events.iarisk);
+     if (result != null) { 
+       const riskReasonRegex = /riskReason:([^,]+)/
+       const riskScoreRegex = /riskScore:([^,]+)/
+       const riskThresholdRegex = /riskThreshold:([^,]+)/
+       const riskResultRegex = /risky:([^,]+)/
+       result = msg.match(riskResultRegex);
+       if (result != null ) { gRisk.riskResult = result[1];} else {gRisk.riskResult = "false"} ;
+       result = msg.match(riskReasonRegex);
+       if (result != null ) { gRisk.riskReason = result[1];} else {gRisk.riskReason = "NO_RISK"} ;
+       result = msg.match(riskScoreRegex);
+       if (result != null ) { gRisk.riskScore = result[1];} else {gRisk.riskScore = "0"} ;
+       result = msg.match(riskThresholdRegex);
+       if (result != null ) { gRisk.riskThreshold = result[1];} else {gRisk.riskThreshold = "0"} ;
+       if (gRisk.riskReason != null) {
+          if (debugLevel > 0) { console.log("RISK DETAILS : " + gRisk.riskResult + " / " + gRisk.riskReason + " / " + gRisk.riskScore + " / " + gRisk.riskThreshold);};
+       } else {
+          console.log("RISK REASON : NOT FOUND" + msg); 
+       }
      }
   }
 

@@ -37,3 +37,4 @@
       secondaryAuth: 'Secondary authentication successful.'
       invalidCred1: 'Authentication failed - Invalid Credentials'
       invalidCred2: 'Incorrect authentication credentials'
+      iarisk: 'IARisk EvaluateRisk Completed. Response - (.*)'
