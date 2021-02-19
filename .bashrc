@@ -31,9 +31,11 @@ alias make="uninstall; build ; push ; install; env; sleep 5; export METRICSPOD=`
 
 export METRICSPOD=`kubectl get pods -n analytics | grep exporter | awk '{ print $1 }'`
 alias logs='kubectl logs -f  -n $ANALYTICSNAMESPACE $METRICSPOD' 
+alias sim0='kubectl exec -it -n $ANALYTICSNAMESPACE $METRICSPOD -- curl http://0.0.0.0:8080/sim?simlevel=0'
 alias sim1='kubectl exec -it -n $ANALYTICSNAMESPACE $METRICSPOD -- curl http://0.0.0.0:8080/sim?simlevel=1'
 alias sim2='kubectl exec -it -n $ANALYTICSNAMESPACE $METRICSPOD -- curl http://0.0.0.0:8080/sim?simlevel=2'
 alias sim3='kubectl exec -it -n $ANALYTICSNAMESPACE $METRICSPOD -- curl http://0.0.0.0:8080/sim?simlevel=3'
+alias debug0='kubectl exec -it -n $ANALYTICSNAMESPACE $METRICSPOD -- curl http://0.0.0.0:8080/debug?debuglevel=0'
 alias debug1='kubectl exec -it -n $ANALYTICSNAMESPACE $METRICSPOD -- curl http://0.0.0.0:8080/debug?debuglevel=1'
 alias debug2='kubectl exec -it -n $ANALYTICSNAMESPACE $METRICSPOD -- curl http://0.0.0.0:8080/debug?debuglevel=2'
 alias debug3='kubectl exec -it -n $ANALYTICSNAMESPACE $METRICSPOD -- curl http://0.0.0.0:8080/debug?debuglevel=3'

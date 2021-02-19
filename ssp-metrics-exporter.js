@@ -7,15 +7,8 @@ const cache_ttl = 300 // 300 second cache data TTL
 const express = require('express')
 const app = express()
 const port = 8080;
-var   simLevel = 3;
-var   debugLevel = 0;
-
-var   gRisk = {
-        riskResult: "",
-        riskReason: "",
-        riskScore: "",
-        riskThreshold: ""
-      };
+var   simLevel = 0;
+var   debugLevel = 2;
 
 var bodyParser = require('body-parser');
 //app.use(bodyParser.json()); // support json encoded bodies
@@ -24,8 +17,8 @@ app.use(bodyParser.json({limit: '200mb'}));
 app.use(bodyParser.urlencoded({limit: '200mb', extended: true}));
 
 
-const maxAuthSessionTimer = 5000; // milliseconds ; assumes authn is abandoned if not completed with 2 minutes
-const maxAuthSessionDuration = 60000; // milliseconds ; assumes authn is abandoned if not completed with 2 minutes
+const maxAuthSessionTimer = 5000; // milliseconds ; timer to scan for abandoned calls.
+const maxAuthSessionDuration = 120000; // milliseconds ; assumes authn is abandoned if not completed with 2 minutes
 
 
 function simData(){
@@ -108,14 +101,11 @@ try {
 var events = {
     loginSuccess: new RegExp(settings.events.loginSuccess, "g") ,
     loginFailure: new RegExp(settings.events.loginFailure, "g") ,
-    riskScore: new RegExp(settings.events.riskScore) ,
-    riskFactor: new RegExp(settings.events.riskFactor) ,
     primaryAuth: new RegExp(settings.events.primaryAuth) ,
     secondaryAuth: new RegExp(settings.events.secondaryAuth) ,
     authStart: new RegExp(settings.events.authStart) ,
     authEnd: new RegExp(settings.events.authEnd) ,
-    invalidCred1: new RegExp(settings.events.invalidCred1),
-    invalidCred2: new RegExp(settings.events.invalidCred2),
+    invalidCredential: new RegExp(settings.events.invalidCredential),
     iarisk: new RegExp(settings.events.iarisk)
 }
 
@@ -129,55 +119,124 @@ function between(min, max) {
   )
 }
 
-app.get('/debug', (req, res) => {
 
-  if (req.query.debuglevel !== undefined) {
-     debugLevel = Number(req.query.debuglevel);
-     var msg = "Debug set to level - " + debugLevel + "\n";
-     res.send(msg);
-  } else {
-     res.send('debuglevel parameter required \n')
-  }
-})
+var ssp_cred_fail_txn = {
+   cache: new NodeCache(),
 
-app.get('/sim', (req, res) => {
+   fail: function(uid,appName, userName, factorType, responseCode, factorRoll,txnId) {
 
-  if (req.query.simlevel !== undefined) {
-     simLevel = Number(req.query.simlevel);
-     ssp_authn_txn.sim();
-     if (simLevel < 2) {ssp_authn_txn.flush();}
-     var msg = "Simulation set to level - " + simLevel + "\n";
-     res.send(msg);
-  } else {
-     res.send('simlevel parameter required \n')
-  }
-})
+     var rec = {
+        appName: "",
+        source: "SSP",
+        userName: "",
+        factorType: "",
+        factorRoll: "",
+        responseCode: "",
+        txnId: ""
+     }
+     rec.userName = userName || "anonymous" ;
+     rec.appName = appName || "anonymous" ;
+     rec.factorType = factorType || "unknown" ;
+     rec.factorRoll = factorRoll || "unknown" ;
+     rec.responseCode = responseCode || "unknown" ;
+     rec.txnId = txnId || "unknown" ;
 
-app.get('/metrics', (req, res) => {
-  var response = ssp_authn_txn.print();
-  response += simData(); 
-  if (debugLevel > 2) {console.log(response)};
-  ssp_authn_txn.flush();
-  ssp_authn_txn.sim();
-  res.send(response);
-})
+     if (rec.txnId !== "unknown") {
+        var trans = ssp_authn_txn.cache.get(rec.txnId);
+        if (trans !== undefined) {
+           if (rec.factorRoll === "primary") {
+              trans.primaryCredential = rec.factorType;
+           } else {
+              if (rec.factorRoll === "secondary") {
+                 trans.secondaryCredential = rec.factorType;
+              }
+           }
+           ssp_authn_txn.cache.set(rec.txnId,trans);
+        }
+     }
 
+     if (debugLevel > 0) {console.log(uid, "\t", events.invalidCredential, "\t", rec.userName, "\t", rec.appName, "\t", rec.factorType, "\t", rec.factorRoll, "\t", rec.responseCode); }
+     ssp_cred_fail_txn.cache.set(uid,rec);
+   },
+
+   flush: function (){
+
+      var keys = ssp_cred_fail_txn.cache.keys();
+      for (var keyId in keys) {
+         ssp_cred_fail_txn.cache.del(keys[keyId]);
+      }
+   },
+
+   print: function() {
+
+      var str = "";
+      var keys = ssp_cred_fail_txn.cache.keys();
+      for (var keyId in keys) {
+         var rec = ssp_cred_fail_txn.cache.get(keys[keyId]);
+         var respCode = rec.responseCode.match(/\d+/)[0];
+         str += `ssp_cred_error{appName=\"${rec.appName}\",uid=\"${keys[keyId]}\",source=\"${rec.source}\",userName=\"${rec.userName}\",factorType=\"${rec.factorType}\"} ${respCode}\n`
+      }
+      if (debugLevel == 11) {console.log("CRED-FAIL PRINT : " + str);};
+      return (str);
+   }
+}
+
+
+
+var ssp_risk_txn = {
+   riskCache: new NodeCache(),
+   userCache: new NodeCache(),
+
+   user: function(uuid,username) {
+      ssp_risk_txn.userCache.set(uuid,username);
+      if (debugLevel > 0 ) {console.log("\tRISK.USER = " + uuid + " / " + username );};
+   },
+   risk: function(uuid,appName,riskReason, riskScore, riskThreshold, risky) {
+      var rec = {
+         uuid: "",
+         source: "SSP",
+         userName: "",
+         appName: "",
+         riskReason: "",
+         riskScore: 0,
+         riskThreshold: 0,
+         risky: ""
+      };
+      rec.userName = ssp_risk_txn.userCache.get(uuid) || "anonymous" ;
+      rec.uuid = uuid || "anonymous" ;
+      rec.appName = appName || "anonymous" ;
+      rec.riskReason = riskReason;
+      rec.riskScore = Number(riskScore);
+      rec.riskThreshold = Number(riskThreshold);
+      rec.risky = risky;
+      ssp_risk_txn.riskCache.set(uuid,rec);
+      if (debugLevel > 0 ) {console.log("\tRISK.EVENT = " + rec.uuid + " / " + rec.appName + " / " + rec.riskReason + " / " +  rec.riskScore + " / " +  rec.riskThreshold + " / " + rec.risky );};
+   },
+
+   flush: function (){
+
+      var keys = ssp_risk_txn.riskCache.keys();
+      for (var keyId in keys) {
+         ssp_risk_txn.riskCache.del(keys[keyId]);
+      }
+   },
+
+   print: function() {
+
+      var str = "";
+      var keys = ssp_risk_txn.riskCache.keys();
+      for (var keyId in keys) {
+         var rec = ssp_risk_txn.riskCache.get(keys[keyId]);
+         str += `ssp_risk{appName=\"${rec.appName}\",source=\"${rec.source}\",userId=\"${rec.uuid}\",userName=\"${rec.userName}\",riskReason=\"${rec.riskReason}\",riskThreshold=\"${rec.riskThreshold}\"} ${rec.riskScore}\n`
+      }
+      if (debugLevel == 11) {console.log("RISK PRINT : " + str);};
+      return (str);
+   }
+
+}
 
 var ssp_authn_txn = {
    cache: new NodeCache(),
-   txn: {
-      source: "",
-      userId: "",
-      startTime: 0.0,
-      endTime: 0.0,
-      appName: "",
-      factors: [],
-      primaryCredential: "",
-      secondaryCredential: "",
-      riskScore: 0,
-      riskFactor: "NO_RISK",
-      result: false
-   },
    sim: function(){
       var duration = 0.0;
       var txnId = "";
@@ -190,9 +249,7 @@ var ssp_authn_txn = {
          factors: [],
          primaryCredential: "",
          secondaryCredential: "",
-         credError: [ { credential: "", count: 0 }, { credential: "", count: 0}],
          riskScore: 0,
-         riskFactor: "NO_RISK",
          result: false
       };
       if (simLevel > 1) {
@@ -209,12 +266,7 @@ var ssp_authn_txn = {
                      rec.factors[0] = settings.factors[k];
                      rec.primaryCredential = settings.credentials[Math.floor(Math.random() * (settings.credentials.length - 1))];
                      rec.secondaryCredential = settings.credentials[Math.floor(Math.random() * (settings.credentials.length - 1))];
-                     rec.credError[0].credential = rec.primaryCredential;
-                     rec.credError[0].count = Math.floor(Math.random() * 7);
-                     rec.credError[1].credential = rec.secondaryCredential;
-                     rec.credError[1].count = Math.floor(Math.random() * 7);
                      rec.riskScore = Math.floor(Math.random() * 90);
-                     rec.riskFactor = settings.factors[k];
                      rec.result = settings.results[l];
                      this.cache.set(txnId,rec);
                   }
@@ -244,27 +296,23 @@ var ssp_authn_txn = {
       var ssp_cred_error_response = "# HELP ssp_cred_error: Count of errors when using 1st and 2nd facture authenticationr. \n";
       ssp_cred_error_response = ssp_cred_error_response + "# TYPE ssp_cred_error gauge\n" ;
 
+      ssp_risk_response += ssp_risk_txn.print() ; 
+      ssp_cred_error_response += ssp_cred_fail_txn.print() ; 
+
       var keys = this.cache.keys();
       for (var keyId in keys) {
          var rec = this.cache.get(keys[keyId]);
          if (Number(rec.endTime) !== 0) {
             var duration = Number(rec.endTime) - Number(rec.startTime);
-            var str1 = `ssp_authn{client=\"${rec.appName}\",source=\"${rec.source}\",userId=\"${rec.userId}\",credential1=\"${rec.primaryCredential}\",credential2=\"${rec.secondaryCredential}\",factor=\"${rec.riskFactor}\",result=\"${rec.result}\",txnId=\"${keys[keyId]}\"} ${duration}\n`
+            var str1 = `ssp_authn{appName=\"${rec.appName}\",source=\"${rec.source}\",userId=\"${rec.userId}\",credential1=\"${rec.primaryCredential}\",credential2=\"${rec.secondaryCredential}\",result=\"${rec.result}\",txnId=\"${keys[keyId]}\"} ${duration}\n`
             if (debugLevel == 5) {console.log(str1);};
             ssp_authn_response += str1 ; 
-            var str2 = `ssp_risk{client=\"${rec.appName}\",source=\"${rec.source}\",userId=\"${rec.userId}\",credential1=\"${rec.primaryCredential}\",credential2=\"${rec.secondaryCredential}\",factor=\"${rec.riskFactor}\",risky=\"${rec.riskResult}\",result=\"${rec.result}\",txnId=\"${keys[keyId]}\"} ${rec.riskScore}\n`
-            if (debugLevel == 6) {console.log(str2);};
-            ssp_risk_response += str2 ; 
-            var str3 = `ssp_cred_error{client=\"${rec.appName}\",source=\"${rec.source}\",userId=\"${rec.userId}\",credential=\"${rec.credError[0].credential}\",factor=\"${rec.riskFactor}\",result=\"${rec.result}\",txnId=\"${keys[keyId]}\"} ${rec.credError[0].count}\n`
-            str3 += `ssp_cred_error{client=\"${rec.appName}\",source=\"${rec.source}\",userId=\"${rec.userId}\",credential=\"${rec.credError[1].credential}\",factor=\"${rec.riskFactor}\",result=\"${rec.result}\",txnId=\"${keys[keyId]}\"} ${rec.credError[1].count}\n`
-            if (debugLevel == 7) {console.log(str3);};
-            ssp_cred_error_response += str3 ; 
          }
       }
       return (ssp_authn_response + ssp_risk_response  + ssp_cred_error_response);
    },
 
-   start: function(key,timestamp,userId) {
+   start: function(key,timestamp,userId,appName) {
       var trans = ssp_authn_txn.cache.get(key);
       if (trans == undefined) {
          // Not found, so start of a new transaction.
@@ -277,140 +325,64 @@ var ssp_authn_txn = {
             factors: [],
             primaryCredential: "",
             secondaryCredential: "",
-            credError: [ { credential: "", count: 0 }, { credential: "", count: 0}],
             riskScore: 0,
-            riskFactor: "NO_RISK",
             result: false
          };
          rec.startTime = timestamp;
          rec.userId = userId;
-         rec.riskResult = gRisk.riskResult;
-         rec.riskFactor = gRisk.riskReason;
-         rec.riskScore = gRisk.riskScore;
-         rec.riskThreshold = gRisk.riskThreshold;
+         rec.appName = appName;
          ssp_authn_txn.cache.set(key,rec);
-         if (debugLevel > 0) {console.log("authStart - ", key, " - ", timestamp); }
+         if (debugLevel > 0) {console.log(key, "\t", events.authStart,  " (new)\t", userId, "\t", appName, "\t", timestamp); }
       } else {
          trans.startTime = timestamp;
          trans.userId = userId;
-         trans.riskResult = gRisk.riskResult;
-         trans.riskFactor = gRisk.riskReason;
-         trans.riskScore = gRisk.riskScore;
-         trans.riskThreshold = gRisk.riskThreshold;
+         trans.appName = appName;
          ssp_authn_txn.cache.set(key,trans);
-         if (debugLevel > 0) {console.log("authStart - ", key, " - ", timestamp); }
+         if (debugLevel > 0) {console.log(key, "\t", events.authStart,  " (existing)\t", userId, "\t", appName, "\t", timestamp); }
       }
    },
 
    end: function(key,timestamp) {
       var trans = ssp_authn_txn.cache.get(key);
       if (trans == undefined) {
-	 console.log("END Cant find txnId = ", key);
+	 console.log(key, "\t", events.authEnd, "\t", "Cant find txnId = ", key);
       } else {
+         if (debugLevel > 0) {console.log(key, "\t", events.authEnd,  "\t", trans.userId, "\t", trans.appName, "\t", timestamp); }
          trans.endTime = timestamp;
          ssp_authn_txn.cache.set(key,trans);
       }
-      if (debugLevel > 0) {console.log("authEnd - ", key, " - ", timestamp); }
    },
 
-   riskScore: function(key,timestamp,appName,factor,score) {
-      var trans = ssp_authn_txn.cache.get(key);
-      if (trans == undefined) {
-         var rec = {
-            source: "SSP",
-            startTime: 0.0,
-            endTime: 0.0,
-            appName: "",
-            factors: [],
-            primaryCredential: "",
-            secondaryCredential: "",
-            credError: [ { credential: "", count: 0 }, { credential: "", count: 0}],
-            riskScore: 0,
-            riskFactor: "NO_RISK",
-            result: false
-         };
-         rec.appName = appName;
-         rec.riskScore = score;
-         rec.riskFactor = factor;
-         ssp_authn_txn.cache.set(key,rec);
-      } else {
-         trans.appName = appName;
-         trans.riskScore = score;
-         trans.riskFactor = factor;
-         ssp_authn_txn.cache.set(key,trans);
-      }
-      if (debugLevel > 0) {console.log("Risk Score - ", key, " - ", timestamp, " - ", appName, " - ", factor , " - ", score);}
-   },
-
-   riskFactor: function(key,timestamp, appName, factor,score) {
-      var trans = ssp_authn_txn.cache.get(key);
-      if (trans == undefined) {
-         var rec = {
-            source: "SSP",
-            startTime: 0.0,
-            endTime: 0.0,
-            appName: "",
-            factors: [],
-            primaryCredential: "",
-            secondaryCredential: "",
-            credError: [ { credential: "", count: 0 }, { credential: "", count: 0}],
-            riskScore: 0,
-            riskFactor: "NO_RISK",
-            result: false
-         };
-         rec.factors.push({ "factor": factor, "score": score });
-         rec.appName = appName;
-         rec.riskScore = score;
-         rec.riskFactor = factor;
-         ssp_authn_txn.cache.set(key,rec);
-      } else {
-         trans.factors.push({ "factor": factor, "score": score });
-         ssp_authn_txn.cache.set(key,trans);
-      }
-      if (debugLevel > 0) {console.log("Risk Factor - ", key, " - ", timestamp, " - ", appName, " - ", factor, " - ", score); }
-   },
    primaryCredential: function(key,timestamp, credential) {
       var trans = ssp_authn_txn.cache.get(key);
       if (trans == undefined) {
-	 console.log("PRIMARY CRED Cant find txnId = ", key);
+	 console.log(key, "\t", events.primaryAuth, "\t Cant find txnId = ", key);
       } else {
+         if (debugLevel > 0) {console.log(key, "\t", events.primaryAuth,  "\t", trans.userId, "\t", trans.appName, "\t", credential, "\t", timestamp); }
          trans.primaryCredential = credential;
          ssp_authn_txn.cache.set(key,trans);
       }
-      if (debugLevel > 0) {console.log("Primary Credential - ", key, " - ", timestamp, " - ", credential); }
    },
    secondaryCredential: function(key,timestamp, credential) {
       var trans = ssp_authn_txn.cache.get(key);
       if (trans == undefined) {
-	 console.log("SECONDARY CRED Cant find txnId = ", key);
+	 console.log(key, "\t", events.secondaryAuth, "\t Cant find txnId = ", key);
       } else {
+         if (debugLevel > 0) {console.log(key, "\t", events.secondaryAuth,  "\t", trans.userId, "\t", trans.appName, "\t", credential, "\t", timestamp); }
          trans.secondaryCredential = credential;
          ssp_authn_txn.cache.set(key,trans);
       }
-      if (debugLevel > 0) {console.log("Secondary Credential - ", key, " - ", timestamp, " - ", credential); }
    },
    result: function(key,timestamp,result) {
       var trans = ssp_authn_txn.cache.get(key);
       if (trans == undefined) {
-	 console.log("RESULT Cant find txnId = ", key);
+	 console.log(key, "\t", events.authEnd, "\t Cant find txnId = ", key);
       } else {
+         if (debugLevel > 0) {console.log(key, "\t", events.authEnd,  "\t", trans.userId, "\t", trans.appName, "\t", result, "\t", timestamp); }
          trans.endTime = timestamp;
          trans.result = result;
          ssp_authn_txn.cache.set(key,trans);
       }
-      if (!result) { if (debugLevel > 0) {console.log("Failure - ", key, " - ", timestamp)};}
-      if (result) { if (debugLevel > 0) {console.log("success - ", key, " - ", timestamp)};}
-   },
-   fail: function(key,timestamp,credential,credId) {
-      var trans = ssp_authn_txn.cache.get(key);
-      if (trans == undefined) {
-	 console.log("FAIL Cant find txnId = ", key);
-      } else {
-         trans.credError[credId].count += 1;
-         trans.credError[credId].credential = credential;
-         ssp_authn_txn.cache.set(key,trans);
-      }
-      if (debugLevel > 0) {console.log("Credential Error - ", key, " - ", timestamp, " - ", credential)};
    },
    abandoned: function () {
       var keys = ssp_authn_txn.cache.keys();
@@ -423,6 +395,7 @@ var ssp_authn_txn = {
                   rec.result = "failure";
                   rec.endTime = currentTime.toString();
                   ssp_authn_txn.cache.set(keys[keyId],rec);
+                  if (debugLevel > 0) {console.log(keys[keyId], "\t", "Login Abandoned",  "\t", rec.userId, "\t", rec.appName, "\t", rec.result ); }
                }
             }
          }
@@ -440,59 +413,84 @@ app.post('/sspLogStream', function(req, res) {
   for (var i = 0; i < req.body.length ; i++) {
      var msg = req.body[i].msg;
 
-     result = msg.match(events.riskScore);
-     if (result != null) { 
-        ssp_authn_txn.riskScore(req.body[i].txnId, req.body[i].date, req.body[i].appName, result[1], result[2]); 
-     }
-     result = msg.match(events.riskFactor);
-     if (result != null) { 
-        ssp_authn_txn.riskFactor(req.body[i].txnId, req.body[i].date, req.body[i].appName, result[1], result[2]); 
-     }
-
      if (msg.match(events.primaryAuth)) {
         ssp_authn_txn.primaryCredential(req.body[i].txnId, req.body[i].date, req.body[i]["factor-me-primary-ext-factorType"]); 
      }
-     //result = msg.match(events.secondaryAuth);
      if (msg.match(events.secondaryAuth)) {
         ssp_authn_txn.secondaryCredential(req.body[i].txnId, req.body[i].date, req.body[i]["factor-me-secondary-ext-factorType"]); 
      }
      result = msg.match(events.authStart);
      if (result != null) { 
-        ssp_authn_txn.start(req.body[i].txnId, req.body[i].date,req.body[i].userLoginId); 
+        ssp_authn_txn.start(req.body[i].txnId, req.body[i].date,req.body[i].userLoginId,req.body[i].appName); 
      }
      if (msg.match(events.authEnd)) {
         ssp_authn_txn.result(req.body[i].txnId,req.body[i].date,"success");
+        if (req.body[i].sub !== undefined) {
+           ssp_risk_txn.user(req.body[i].sub,req.body[i].userUniversalId);
+        } else {
+           console.log("ERROR PROCESSING AUTHEND - " + msg);
+           console.log(req.body[i]);
+        }
      }
-     if (msg.match(events.invalidCred1)) {
-        ssp_authn_txn.fail(req.body[i].txnId,req.body[i].date,req.body[i]["factor-me-primary-ext-factorType"],0);
+     result = msg.match(events.invalidCredential);
+     var factorType = "";
+     var factorRoll = "";
+     if (result != null) { 
+        if (req.body[i].eventId === "factor.me.primary.failure") {
+           factorType = req.body[i]["factor-me-primary-ext-factorType"] ;
+           factorRoll = "primary";
+        } else {
+           if (req.body[i].eventId === "factor.me.secondary.failure") {
+              factorType = req.body[i]["factor-me-secondary-ext-factorType"] ;
+              factorRoll = "secondary";
+           }
+        }
+       ssp_cred_fail_txn.fail(req.body[i].date, req.body[i].appName,req.body[i].userLoginId,factorType,req.body[i].responseCode,factorRoll,req.body[i].txnId);
      }
-     if (msg.match(events.invalidCred2)) {
-        ssp_authn_txn.fail(req.body[i].txnId,req.body[i].date,req.body[i]["factor-me-secondary-ext-factorType"],1);
-     }
+
      result = msg.match(events.iarisk);
      if (result != null) { 
-       const riskReasonRegex = /riskReason:([^,]+)/
-       const riskScoreRegex = /riskScore:([^,]+)/
-       const riskThresholdRegex = /riskThreshold:([^,]+)/
-       const riskResultRegex = /risky:([^,]+)/
-       result = msg.match(riskResultRegex);
-       if (result != null ) { gRisk.riskResult = result[1];} else {gRisk.riskResult = "false"} ;
-       result = msg.match(riskReasonRegex);
-       if (result != null ) { gRisk.riskReason = result[1];} else {gRisk.riskReason = "NO_RISK"} ;
-       result = msg.match(riskScoreRegex);
-       if (result != null ) { gRisk.riskScore = result[1];} else {gRisk.riskScore = "0"} ;
-       result = msg.match(riskThresholdRegex);
-       if (result != null ) { gRisk.riskThreshold = result[1];} else {gRisk.riskThreshold = "0"} ;
-       if (gRisk.riskReason != null) {
-          if (debugLevel > 0) { console.log("RISK DETAILS : " + gRisk.riskResult + " / " + gRisk.riskReason + " / " + gRisk.riskScore + " / " + gRisk.riskThreshold);};
-       } else {
-          console.log("RISK REASON : NOT FOUND" + msg); 
-       }
+       ssp_risk_txn.risk(req.body[i].userLoginId,req.body[i].appName,req.body[i].riskReason,req.body[i].riskScore,req.body[i].riskThreshold,req.body[i].risky);
      }
   }
 
   res.sendStatus(200);
 });
+
+app.get('/debug', (req, res) => {
+
+  if (req.query.debuglevel !== undefined) {
+     debugLevel = Number(req.query.debuglevel);
+     var msg = "Debug set to level - " + debugLevel + "\n";
+     res.send(msg);
+  } else {
+     res.send('debuglevel parameter required \n')
+  }
+})
+
+app.get('/sim', (req, res) => {
+
+  if (req.query.simlevel !== undefined) {
+     simLevel = Number(req.query.simlevel);
+     ssp_authn_txn.sim();
+     if (simLevel < 2) {ssp_authn_txn.flush();}
+     var msg = "Simulation set to level - " + simLevel + "\n";
+     res.send(msg);
+  } else {
+     res.send('simlevel parameter required \n')
+  }
+})
+
+app.get('/metrics', (req, res) => {
+  var response = ssp_authn_txn.print();
+  response += simData(); 
+  if (debugLevel > 1) {console.log(response)};
+  ssp_authn_txn.flush();
+  ssp_risk_txn.flush();
+  ssp_cred_fail_txn.flush();
+  ssp_authn_txn.sim();
+  res.send(response);
+})
 
 app.listen(port, () => {
   console.log(`SSP-METRICS-EXPORTER listening at http://0.0.0.0:${port}`)
