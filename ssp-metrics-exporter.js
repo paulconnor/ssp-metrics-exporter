@@ -282,7 +282,7 @@ var ssp_authn_txn = {
       var keyId = 0;
       for (keyId in keys) {
          var rec = this.cache.get(keys[keyId]);
-         if (Number(rec.endTime) !== 0) {
+         if ((Number(rec.endTime) !== 0) && (Number(rec.startTime) !== 0)) {
             this.cache.del(keys[keyId]);
          }
       }
@@ -302,7 +302,7 @@ var ssp_authn_txn = {
       var keys = this.cache.keys();
       for (var keyId in keys) {
          var rec = this.cache.get(keys[keyId]);
-         if (Number(rec.endTime) !== 0) {
+         if ((Number(rec.endTime) !== 0) && (Number(rec.startTime) !== 0)) {
             var duration = Number(rec.endTime) - Number(rec.startTime);
             var str1 = `ssp_authn{appName=\"${rec.appName}\",source=\"${rec.source}\",userId=\"${rec.userId}\",credential1=\"${rec.primaryCredential}\",credential2=\"${rec.secondaryCredential}\",result=\"${rec.result}\",txnId=\"${keys[keyId]}\"} ${duration}\n`
             if (debugLevel == 5) {console.log(str1);};
@@ -313,6 +313,9 @@ var ssp_authn_txn = {
    },
 
    start: function(key,timestamp,userId,appName) {
+      if (key == undefined) {
+         console.log("Undefined txnId provided with authStart message");
+      }
       var trans = ssp_authn_txn.cache.get(key);
       if (trans == undefined) {
          // Not found, so start of a new transaction.
@@ -346,6 +349,20 @@ var ssp_authn_txn = {
       var trans = ssp_authn_txn.cache.get(key);
       if (trans == undefined) {
 	 console.log(key, "\t", events.authEnd, "\t", "Cant find txnId = ", key);
+         var rec = {
+            source: "SSP",
+            userId: "",
+            startTime: 0.0,
+            endTime: 0.0,
+            appName: "",
+            factors: [],
+            primaryCredential: "",
+            secondaryCredential: "",
+            riskScore: 0,
+            result: false
+         };
+         rec.endTime = timestamp;
+         ssp_authn_txn.cache.set(key,rec);
       } else {
          if (debugLevel > 0) {console.log(key, "\t", events.authEnd,  "\t", trans.userId, "\t", trans.appName, "\t", timestamp); }
          trans.endTime = timestamp;
@@ -357,6 +374,20 @@ var ssp_authn_txn = {
       var trans = ssp_authn_txn.cache.get(key);
       if (trans == undefined) {
 	 console.log(key, "\t", events.primaryAuth, "\t Cant find txnId = ", key);
+         var rec = {
+            source: "SSP",
+            userId: "",
+            startTime: 0.0,
+            endTime: 0.0,
+            appName: "",
+            factors: [],
+            primaryCredential: "",
+            secondaryCredential: "",
+            riskScore: 0,
+            result: false
+         };
+         rec.primaryCredential = credential;
+         ssp_authn_txn.cache.set(key,rec);
       } else {
          if (debugLevel > 0) {console.log(key, "\t", events.primaryAuth,  "\t", trans.userId, "\t", trans.appName, "\t", credential, "\t", timestamp); }
          trans.primaryCredential = credential;
@@ -367,6 +398,20 @@ var ssp_authn_txn = {
       var trans = ssp_authn_txn.cache.get(key);
       if (trans == undefined) {
 	 console.log(key, "\t", events.secondaryAuth, "\t Cant find txnId = ", key);
+         var rec = {
+            source: "SSP",
+            userId: "",
+            startTime: 0.0,
+            endTime: 0.0,
+            appName: "",
+            factors: [],
+            primaryCredential: "",
+            secondaryCredential: "",
+            riskScore: 0,
+            result: false
+         };
+         rec.secondaryCredential = credential;
+         ssp_authn_txn.cache.set(key,rec);
       } else {
          if (debugLevel > 0) {console.log(key, "\t", events.secondaryAuth,  "\t", trans.userId, "\t", trans.appName, "\t", credential, "\t", timestamp); }
          trans.secondaryCredential = credential;
@@ -374,9 +419,27 @@ var ssp_authn_txn = {
       }
    },
    result: function(key,timestamp,result) {
+      if (key == undefined) {
+	 console.log(key, "\t", events.authEnd, "\t txnId undefined = ", key);
+      }
       var trans = ssp_authn_txn.cache.get(key);
       if (trans == undefined) {
 	 console.log(key, "\t", events.authEnd, "\t Cant find txnId = ", key);
+         var rec = {
+            source: "SSP",
+            userId: "",
+            startTime: 0.0,
+            endTime: 0.0,
+            appName: "",
+            factors: [],
+            primaryCredential: "",
+            secondaryCredential: "",
+            riskScore: 0,
+            result: false
+         };
+         rec.endTime = timestamp;
+         rec.result = result;
+         ssp_authn_txn.cache.set(key,rec);
       } else {
          if (debugLevel > 0) {console.log(key, "\t", events.authEnd,  "\t", trans.userId, "\t", trans.appName, "\t", result, "\t", timestamp); }
          trans.endTime = timestamp;
@@ -409,7 +472,6 @@ setInterval(ssp_authn_txn.abandoned, maxAuthSessionTimer);
 app.post('/sspLogStream', function(req, res) {
   var result;
 
-
   for (var i = 0; i < req.body.length ; i++) {
      var msg = req.body[i].msg;
 
@@ -421,6 +483,10 @@ app.post('/sspLogStream', function(req, res) {
      }
      result = msg.match(events.authStart);
      if (result != null) { 
+        if (req.body[i].txnId == undefined) {
+           console.log("ERROR PROCESSING AUTHSTART - " + msg);
+           console.log(req.body[i]);
+        }
         ssp_authn_txn.start(req.body[i].txnId, req.body[i].date,req.body[i].userLoginId,req.body[i].appName); 
      }
      if (msg.match(events.authEnd)) {
