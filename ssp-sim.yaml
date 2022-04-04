@@ -1,16 +1,19 @@
 --- # SSP Configuration data
   credentials:
     - FIDO
+    - SECURITYKEY
     - MOTP
-    - SMS
-    - PUSH
-    - ldap
-    - PASSWORD
+    - sms
+    - email
+    - totp_push
+    - password
   factors:
-    - RISKY_COUNTRY
-    - DEVICE_MFP_MISMATCH
-    - KNOWN_FRAUD
-    - DIFFICULT_TRAVEL
+    - "Blocked IP"
+    - "Device recognition"
+    - "Behavior anomaly"
+    - "Work day time"
+    - "Known Fraud"
+    - "User Velocity"
   clients:
     - democlient1
     - democlient2
@@ -26,12 +29,11 @@
     - success
     - failure
   events:
-      loginSuccess: 'Authentication for user (.*) successful'
-      loginFailure: 'Invalid password for (.*) Invalid Credentials'
-      credential: 'Status for authenticateCredentials for (.*) for requestId (.*) : (.*)'
       authStart: 'Authentication initiated successfully'
       authEnd: 'Authentication Successful, ID token generated.'
-      primaryAuth: 'Primary authentication successful.'
-      secondaryAuth: 'Secondary authentication successful.'
-      invalidCredential: 'Incorrect authentication credentials'
-      iarisk: '^Risk Evaluated Successfully$'
+      iarisk: '^Risk Evaluated Successfully.$'
+      factorSuccess: '^User completed factor authentication$'
+      factorFail: '^User failed factor authentication (.*)'
+      loginFailure: 'Password authentication failed: invalid credentials'
+      registeredDevice: 'Is registered device shared: \[true\]'
+      unregisteredDevice: 'Is registered device shared: \[false\]'

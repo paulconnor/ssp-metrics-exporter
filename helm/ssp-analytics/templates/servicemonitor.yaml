@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Values.ssp.analytics.name }}
+  labels:
+    app: {{ .Values.ssp.analytics.name }}
+    release: prometheus-operator
+spec:
+  selector:
+    matchLabels:
+      app: {{ .Values.ssp.analytics.name }}
+  endpoints:
+  - interval: 30s
+    path: /metrics
+    port: web

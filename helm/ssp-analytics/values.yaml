@@ -1,0 +1,134 @@
+# Default values for ssp-analytics.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+#
+
+ssp:
+  analytics:
+    name: ssp-metrics-exporter
+    host: ssp-metrics-exporter.analytics.svc
+    port: 8080
+  sim:
+    name: ssp-sim
+    port: 8080
+
+global:
+  sso:
+    enabled: false
+
+
+# ***************************************************  Start of SSP Fluent Bit Runtime Config ***************************************************
+
+# SSP Fluentbit config
+sspfbService:
+  flush: 1
+  logLevel: info
+  parser: cri
+  ingressLogsIncluded: false
+
+metrics:
+  enabled: false
+  service:
+    # labels:
+    #   key: value
+    annotations: {}
+    # In order for Prometheus to consume metrics automatically use the following annotations:
+    # prometheus.io/path: "/api/v1/metrics/prometheus"
+    # prometheus.io/port: "2020"
+    # prometheus.io/scrape: "true"
+    port: 2020
+    type: ClusterIP
+  serviceMonitor:
+    enabled: false
+    additionalLabels: {}
+    # namespace: monitoring
+    # interval: 30s
+    # scrapeTimeout: 10s
+
+input:
+  tail:
+    memBufLimit: 5MB
+    ignore_older: ""
+
+filter:
+  kubeURL: https://kubernetes.default.svc:443
+  kubeCAFile: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+  kubeTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+  kubeTagPrefix: ssp_msg.var.log.containers.
+backend:
+  type: custom
+  #type: splunk
+  forward:
+    host: fluentd
+    port: 24284
+    tls: "off"
+    tls_verify: "on"
+    tls_debug: 1
+    shared_key:
+  es:
+    host: elasticsearch-master.logging.svc
+    port: 9200
+    # Elastic Index Name
+    index: ssp_log
+    logstash_prefix: ssp_log
+    retry_limit: "False"
+    # Optional username credential for Elastic X-Pack access
+    http_user: elastic
+    # Password for user defined in HTTP_User
+    http_passwd: changeme
+    # Optional TLS encryption to ElasticSearch instance
+    tls: "off"
+    tls_verify: "on"
+    # TLS certificate for the Elastic (in PEM format). Use if tls=on and tls_verify=on.
+    tls_ca: ""
+    # TLS debugging levels = 1-4
+    tls_debug: 1
+  splunk:
+    host: 127.0.0.1
+    port: 8088
+    token: ""
+    send_raw: "off"
+    tls: "on"
+    tls_verify: "off"
+    tls_debug: 1
+  stackdriver: {}
+
+  ##
+  ## Ref: http://fluentbit.io/documentation/current/output/http.html
+  ##
+  http:
+    host: 127.0.0.1
+    port: 80
+    uri: "/"
+    http_user:
+    http_passwd:
+    tls: "off"
+    tls_verify: "on"
+    tls_debug: 1
+    ## Specify the data format to be used in the HTTP request body
+    ## Can be either 'msgpack' or 'json'
+    format: msgpack
+    #json_date_format: double or iso8601
+    json_date_format: null
+    headers: []
+
+extraEntries:
+  output: |-
+#     # >=1 additional Key/Value entrie(s) for existing Ouput section
+
+
+analytics:
+  enabled: false
+  siddhi:
+    host: ""
+    port: 8390
+    uri: "/Analytics/UserLoginBehaviour"
+
+# ***************************************************  End of SSP Fluent Bit Runtime Config ***************************************************
+
+
+fluent-bit:
+  enabled: true
+  fullConfigMap: true
+  existingConfigMap: "ssp-fluent-bit-config"
+

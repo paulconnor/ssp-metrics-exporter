@@ -1,0 +1,2 @@
+helm install -n analytics ssp-analytics ./ssp-analytics --set ssp.analytics.host=35.189.9.205 --set sspReleaseName=ssp
+

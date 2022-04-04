@@ -7,7 +7,7 @@ const cache_ttl = 300 // 300 second cache data TTL
 const express = require('express')
 const app = express()
 const port = 8080;
-var   simLevel = 0;
+var   simLevel = 2;
 var   debugLevel = 2;
 
 var bodyParser = require('body-parser');
@@ -101,12 +101,13 @@ try {
 var events = {
     loginSuccess: new RegExp(settings.events.loginSuccess, "g") ,
     loginFailure: new RegExp(settings.events.loginFailure, "g") ,
-    primaryAuth: new RegExp(settings.events.primaryAuth) ,
-    secondaryAuth: new RegExp(settings.events.secondaryAuth) ,
     authStart: new RegExp(settings.events.authStart) ,
     authEnd: new RegExp(settings.events.authEnd) ,
-    invalidCredential: new RegExp(settings.events.invalidCredential),
-    iarisk: new RegExp(settings.events.iarisk)
+    iarisk: new RegExp(settings.events.iarisk) ,
+    factorSuccess: new RegExp(settings.events.factorSuccess) ,
+    factorFail: new RegExp(settings.events.factorFail),
+    registeredDevice: new RegExp(settings.events.registeredDevice),
+    unregisteredDevice: new RegExp(settings.events.unregisteredDevice)
 }
 
 
@@ -123,31 +124,31 @@ function between(min, max) {
 var ssp_cred_fail_txn = {
    cache: new NodeCache(),
 
-   fail: function(uid,appName, userName, factorType, responseCode, factorRoll,txnId) {
+   fail: function(uid,appName, userName, factorType, responseCode, factorRole,txnId) {
 
      var rec = {
         appName: "",
         source: "SSP",
         userName: "",
         factorType: "",
-        factorRoll: "",
+        factorRole: "",
         responseCode: "",
         txnId: ""
      }
      rec.userName = userName || "anonymous" ;
      rec.appName = appName || "anonymous" ;
      rec.factorType = factorType || "unknown" ;
-     rec.factorRoll = factorRoll || "unknown" ;
+     rec.factorRole = factorRole || "unknown" ;
      rec.responseCode = responseCode || "unknown" ;
      rec.txnId = txnId || "unknown" ;
 
      if (rec.txnId !== "unknown") {
         var trans = ssp_authn_txn.cache.get(rec.txnId);
         if (trans !== undefined) {
-           if (rec.factorRoll === "primary") {
+           if (rec.factorRole === "primary") {
               trans.primaryCredential = rec.factorType;
            } else {
-              if (rec.factorRoll === "secondary") {
+              if (rec.factorRole === "secondary") {
                  trans.secondaryCredential = rec.factorType;
               }
            }
@@ -155,7 +156,7 @@ var ssp_cred_fail_txn = {
         }
      }
 
-     if (debugLevel > 0) {console.log(uid, "\t", events.invalidCredential, "\t", rec.userName, "\t", rec.appName, "\t", rec.factorType, "\t", rec.factorRoll, "\t", rec.responseCode); }
+     if (debugLevel > 0) {console.log(uid, "\t", events.invalidCredential, "\t", rec.userName, "\t", rec.appName, "\t", rec.factorType, "\t", rec.factorRole, "\t", rec.responseCode); }
      ssp_cred_fail_txn.cache.set(uid,rec);
    },
 
@@ -178,6 +179,74 @@ var ssp_cred_fail_txn = {
       }
       if (debugLevel == 11) {console.log("CRED-FAIL PRINT : " + str);};
       return (str);
+   },
+   sim: function() {
+      var rec = {
+        appName: "",
+        source: "SIM",
+        userName: "",
+        factorType: "",
+        factorRole: "",
+        responseCode: "",
+        txnId: ""
+      };
+      if (simLevel > 1) {
+         for (var i = 0; i < settings.clients.length ; i++) {
+            for (var j = 0; j < settings.credentials.length ; j++) {
+                  if (Math.random() < 0.5) {
+                     rec.txnId = "82b5166b-83ba-" + Math.floor(1000 + Math.random() * 9000) + "-99ce-6993e194ce3b";
+                     rec.userName = "SIM" + Math.floor(1 + Math.random() * 5),
+                     rec.appName = settings.clients[i];
+                     rec.factorType = settings.credentials[j];
+                     rec.factorRole = "secondary";
+                     rec.responseCode =  '401 UNAUTHORIZED';
+                     var uid = Date.now() + Math.random();
+                     ssp_cred_fail_txn.cache.set(uid,rec);
+                  }
+            }
+         }
+      }
+   }
+}
+
+var ssp_device = {
+
+   Recognized:  0,
+   Unrecognized: 0,
+   found: function(isRecognized) {
+
+      if (isRecognized) {
+         this.Recognized += 1;
+      } else {
+         this.Unrecognized += 1;
+      }
+
+     if (debugLevel > 2) {console.log("ssp_device ", "\t", this.Recognized, "\t", this.Unrecognized); }
+   },
+
+   flush: function (){
+
+      this.Recognized = 0;
+      this.Unrecognized = 0;
+   },
+
+   print: function() {
+
+      var str = "# HELP ssp_device: Count of the number of times a device has been recognized or not during authentication. \n";
+      str +=  "# TYPE ssp_device gauge\n" ;
+      str += `ssp_device{source=\"SSP\",recognized=\"true\"} ${this.Recognized}\n`
+      str += `ssp_device{source=\"SSP\",recognized=\"false\"} ${this.Unrecognized}\n`
+      return (str);
+   },
+
+   sim: function() {
+      var recog =  Math.floor(10 + Math.random() * 50);
+      var unrecog =  Math.floor(50 + Math.random() * 30);
+
+      var str = "";
+      str += `ssp_device{source=\"SIM\",recognized=\"true\"} ${recog}\n`
+      str += `ssp_device{source=\"SIM\",recognized=\"false\"} ${unrecog}\n`
+      return (str);
    }
 }
 
@@ -187,6 +256,39 @@ var ssp_risk_txn = {
    riskCache: new NodeCache(),
    userCache: new NodeCache(),
 
+   sim: function(){
+      var duration = 0.0;
+      var txnId = "";
+      var rec = {
+	 uuid: "",
+         source: "SIM",
+         userName: "",
+         appName: "",
+         riskReason: "",
+         riskScore: 0,
+         riskThreshold: 0,
+         risky: ""
+      };
+      if (simLevel > 1) {
+         for (var i = 0; i < settings.clients.length ; i++) {
+            for (var j = 0; j < settings.credentials.length ; j++) {
+               for (var k = 0; k < settings.factors.length ; k++) {
+                  for (var l = 0; l < settings.results.length ; l++) {
+                     txnId = "82b5166b-83ba-" + Math.floor(1000 + Math.random() * 9000) + "-99ce-6993e194ce3b";
+                     rec.userName = "SIM" + Math.floor(1 + Math.random() * 5),
+                     rec.appName = settings.clients[i];
+                     rec.uuid = "simulated-uuid";
+                     rec.riskScore = Math.floor(Math.random() * 60);
+                     rec.riskThreshold = Math.floor(Math.random() * 90);
+                     rec.risky = (rec.riskScore > rec.riskThreshold) ? "true" : "false" ;
+                     rec.riskReason = settings.factors[k];
+                     this.riskCache.set(txnId,rec);
+                  }
+               }
+            }
+         }
+      }
+   },
    user: function(uuid,username) {
       ssp_risk_txn.userCache.set(uuid,username);
       if (debugLevel > 0 ) {console.log("\tRISK.USER = " + uuid + " / " + username );};
@@ -259,13 +361,13 @@ var ssp_authn_txn = {
                   for (var l = 0; l < settings.results.length ; l++) {
                      txnId = "82b5166b-83ba-" + Math.floor(1000 + Math.random() * 9000) + "-99ce-6993e194ce3b";
                      rec.source = "SIM";
-                     rec.startTime = 0.0;
+                     rec.startTime = Date.now();
                      rec.userId = "SIM" + Math.floor(1 + Math.random() * 5),
                      rec.endTime = rec.startTime + (Math.random() * 10);
                      rec.appName = settings.clients[i];
                      rec.factors[0] = settings.factors[k];
-                     rec.primaryCredential = settings.credentials[Math.floor(Math.random() * (settings.credentials.length - 1))];
-                     rec.secondaryCredential = settings.credentials[Math.floor(Math.random() * (settings.credentials.length - 1))];
+                     rec.primaryCredential = settings.credentials[Math.floor(Math.random() * (settings.credentials.length))];
+                     rec.secondaryCredential = settings.credentials[Math.floor(Math.random() * (settings.credentials.length))];
                      rec.riskScore = Math.floor(Math.random() * 90);
                      rec.result = settings.results[l];
                      this.cache.set(txnId,rec);
@@ -471,16 +573,9 @@ setInterval(ssp_authn_txn.abandoned, maxAuthSessionTimer);
 
 app.post('/sspLogStream', function(req, res) {
   var result;
-
   for (var i = 0; i < req.body.length ; i++) {
      var msg = req.body[i].msg;
 
-     if (msg.match(events.primaryAuth)) {
-        ssp_authn_txn.primaryCredential(req.body[i].txnId, req.body[i].date, req.body[i]["factor-me-primary-ext-factorType"]); 
-     }
-     if (msg.match(events.secondaryAuth)) {
-        ssp_authn_txn.secondaryCredential(req.body[i].txnId, req.body[i].date, req.body[i]["factor-me-secondary-ext-factorType"]); 
-     }
      result = msg.match(events.authStart);
      if (result != null) { 
         if (req.body[i].txnId == undefined) {
@@ -498,26 +593,61 @@ app.post('/sspLogStream', function(req, res) {
            console.log(req.body[i]);
         }
      }
-     result = msg.match(events.invalidCredential);
+
+     result = msg.match(events.factorSuccess);
      var factorType = "";
-     var factorRoll = "";
+     var factorRole = "";
      if (result != null) { 
-        if (req.body[i].eventId === "factor.me.primary.failure") {
-           factorType = req.body[i]["factor-me-primary-ext-factorType"] ;
-           factorRoll = "primary";
+        factorType = req.body[i]["factor-me-auth-complete-ext-factorType"] ;
+        if (req.body[i].errorMsg === events.loginFailure) {
+           factorRole = "primary";
+           ssp_cred_fail_txn.fail(req.body[i].timestamp, req.body[i].appName,req.body[i].userLoginId,factorType,req.body[i].responseCode,factorRole,req.body[i].txnId);
         } else {
-           if (req.body[i].eventId === "factor.me.secondary.failure") {
-              factorType = req.body[i]["factor-me-secondary-ext-factorType"] ;
-              factorRoll = "secondary";
+           if (req.body[i]["factor-me-auth-complete-ext-factorCount"] == 1) {
+
+              ssp_authn_txn.primaryCredential(req.body[i].txnId,req.body[i].timestamp, factorType); 
+
+           } else {
+
+              ssp_authn_txn.secondaryCredential(req.body[i].txnId,req.body[i].timestamp, factorType); 
            }
+
+           console.log("PROCESSING FACTOR SUCCESS - " + msg);
+           //console.log(req.body[i]);
         }
-       ssp_cred_fail_txn.fail(req.body[i].date, req.body[i].appName,req.body[i].userLoginId,factorType,req.body[i].responseCode,factorRoll,req.body[i].txnId);
+     }
+
+     result = msg.match(events.factorFail);
+     var factorType = "";
+     var factorRole = "";
+     if (result != null) { 
+        if (req.body[i].eventId === "factor.me.auth.complete.failure") {
+           factorType = req.body[i]["factor-me-auth-complete-ext-factorType"] ;
+           factorRole = "secondary";
+        } else {
+           console.log("ERROR PROCESSING FACTOR FAIL - " + msg);
+           console.log(req.body[i]);
+        }
+       ssp_cred_fail_txn.fail(req.body[i].date, req.body[i].appName,req.body[i].userLoginId,factorType,req.body[i].responseCode,factorRole,req.body[i].txnId);
      }
 
      result = msg.match(events.iarisk);
      if (result != null) { 
        ssp_risk_txn.risk(req.body[i].userLoginId,req.body[i].appName,req.body[i].riskReason,req.body[i].riskScore,req.body[i].riskThreshold,req.body[i].risky);
      }
+
+     result = msg.match(events.registeredDevice);
+     if (result != null) { 
+        ssp_device.found(true);
+        console.log("found registered device")
+     }
+
+     result = msg.match(events.unregisteredDevice);
+     if (result != null) { 
+        ssp_device.found(false);
+        console.log("found unregistered device")
+     }
+
   }
 
   res.sendStatus(200);
@@ -539,6 +669,8 @@ app.get('/sim', (req, res) => {
   if (req.query.simlevel !== undefined) {
      simLevel = Number(req.query.simlevel);
      ssp_authn_txn.sim();
+     ssp_risk_txn.sim();
+     ssp_cred_fail_txn.sim();
      if (simLevel < 2) {ssp_authn_txn.flush();}
      var msg = "Simulation set to level - " + simLevel + "\n";
      res.send(msg);
@@ -549,12 +681,22 @@ app.get('/sim', (req, res) => {
 
 app.get('/metrics', (req, res) => {
   var response = ssp_authn_txn.print();
-  response += simData(); 
+  response += ssp_device.print();
+  if (simLevel > 0) {
+     response += ssp_device.sim()
+  }
+  //response += simData(); 
   if (debugLevel > 1) {console.log(response)};
+
   ssp_authn_txn.flush();
   ssp_risk_txn.flush();
   ssp_cred_fail_txn.flush();
+  ssp_device.flush();
+
   ssp_authn_txn.sim();
+  ssp_risk_txn.sim();
+  ssp_cred_fail_txn.sim();
+
   res.send(response);
 })
 
